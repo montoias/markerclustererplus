@@ -271,6 +271,10 @@ ClusterIcon.prototype.show = function () {
         "width: " + this.width_ + "px;" +
         "line-height:" + this.height_ + "px;" +
         "'>" + (this.cluster_.hideLabel_ ? ' ' : this.sums_.text) + "</div>";
+
+    // trigger event when img is created in the innerHtml    
+    google.maps.event.trigger(this.cluster_, "cluster_img_created", this.cluster_);    
+    
     if (typeof this.sums_.title === "undefined" || this.sums_.title === "") {
       this.div_.title = this.cluster_.getMarkerClusterer().getTitle();
     } else {
