@@ -103,6 +103,11 @@ function ClusterIcon(cluster, styles) {
   this.center_ = null;
   this.div_ = null;
   this.sums_ = null;
+  this.price_ =  Number.MAX_SAFE_INTEGER;
+  this.is_selected_ = false;
+  this.is_offer_hovered_ = false;
+  this.label_ =  null;
+  this.custom_classes_ = null;
   this.visible_ = false;
 
   this.setMap(cluster.getMap()); // Note: this causes onAdd to be called
@@ -241,40 +246,32 @@ ClusterIcon.prototype.hide = function () {
  */
 ClusterIcon.prototype.show = function () {
   if (this.div_) {
-    var img = "";
-    // NOTE: values must be specified in px units
-    var bp = this.backgroundPosition_.split(" ");
-    var spriteH = parseInt(bp[0].trim(), 10);
-    var spriteV = parseInt(bp[1].trim(), 10);
     var pos = this.getPosFromLatLng_(this.center_);
     this.div_.style.cssText = this.createCss(pos);
-    img = "<img src='" + this.url_ + "' style='position: absolute; top: " + spriteV + "px; left: " + spriteH + "px; ";
-    if (!this.cluster_.getMarkerClusterer().enableRetinaIcons_) {
-      img += "clip: rect(" + (-1 * spriteV) + "px, " + ((-1 * spriteH) + this.width_) + "px, " +
-          ((-1 * spriteV) + this.height_) + "px, " + (-1 * spriteH) + "px);";
-    }
-    else {
-        img += "width: " + this.width_ + "px;" + "height: " + this.height_ + "px;";
-    }
-    img += "'>";
-    this.div_.innerHTML = img + "<div style='" +
-        "position: absolute;" +
-        "top: " + this.anchorText_[0] + "px;" +
-        "left: " + this.anchorText_[1] + "px;" +
-        "color: " + this.textColor_ + ";" +
-        "font-size: " + this.textSize_ + "px;" +
-        "font-family: " + this.fontFamily_ + ";" +
-        "font-weight: " + this.fontWeight_ + ";" +
-        "font-style: " + this.fontStyle_ + ";" +
-        "text-decoration: " + this.textDecoration_ + ";" +
-        "text-align: center;" +
-        "width: " + this.width_ + "px;" +
-        "line-height:" + this.height_ + "px;" +
-        "'>" + (this.cluster_.hideLabel_ ? ' ' : this.sums_.text) + "</div>";
 
-    // trigger event when img is created in the innerHtml    
-    google.maps.event.trigger(this.cluster_, "cluster_img_created", this.cluster_);    
-    
+    var customClasses = this.custom_classes_;
+    if (this.is_selected_) {
+      customClasses += ' selected';
+    }
+
+    if (this.is_offer_hovered_) {
+      customClasses += ' offer-hovered';
+    }
+
+    var isAggregate = parseInt(this.sums_.text) > 1;
+    if (isAggregate) {
+      customClasses += ' from';
+    }
+
+    var innerHTML = "<div class='" + customClasses + "'>" + this.label_;
+    if (isAggregate) {
+      innerHTML += "<div class='price-marker__from'>" + $('#from-label').data('translated-text') + "</div>"
+      innerHTML += "<div class='price-marker__number'>" + (this.cluster_.hideLabel_ ? ' ' : this.sums_.text) + "</div>";
+    }
+    innerHTML += "</div>";
+
+    this.div_.innerHTML = innerHTML;
+
     if (typeof this.sums_.title === "undefined" || this.sums_.title === "") {
       this.div_.title = this.cluster_.getMarkerClusterer().getTitle();
     } else {
@@ -331,7 +328,6 @@ ClusterIcon.prototype.createCss = function (pos) {
   var style = [];
   style.push("cursor: pointer;");
   style.push("position: absolute; top: " + pos.y + "px; left: " + pos.x + "px;");
-  style.push("width: " + this.width_ + "px; height: " + this.height_ + "px;");
   return style.join("");
 };
 
@@ -370,6 +366,8 @@ function Cluster(mc) {
   this.center_ = null;
   this.bounds_ = null;
   this.clusterIcon_ = new ClusterIcon(this, mc.getStyles());
+  this.numberOfFavourites_ = 0;
+  this.offersIds_ = [];
 }
 
 
@@ -464,10 +462,12 @@ Cluster.prototype.remove = function () {
  * Adds a marker to the cluster.
  *
  * @param {google.maps.Marker} marker The marker to be added.
+ * @param {Json} offerMarkerData The data of the marker to be added.
  * @return {boolean} True if the marker was added.
  * @ignore
  */
-Cluster.prototype.addMarker = function (marker) {
+Cluster.prototype.addMarker = function (marker, offerMarkerData) {
+  // minimum price
   var i;
   var mCount;
   var mz;
@@ -513,6 +513,21 @@ Cluster.prototype.addMarker = function (marker) {
     marker.setMap(null);
   }
 
+  if (parseInt(offerMarkerData.price) < this.clusterIcon_.price_) {
+    this.clusterIcon_.price_ = parseInt(offerMarkerData.price);
+    this.clusterIcon_.label_ = offerMarkerData.label;
+  }
+
+  if (this.numberOfFavourites_ < 1) {
+    this.clusterIcon_.custom_classes_ = offerMarkerData.customCssClasses;
+  }
+
+  if (offerMarkerData.isFavourite) {
+    this.numberOfFavourites_++;
+  }
+
+  this.offersIds_.push(offerMarkerData.offerId);
+
   return true;
 };
 
@@ -535,6 +550,26 @@ Cluster.prototype.isMarkerInClusterBounds = function (marker) {
 Cluster.prototype.calculateBounds_ = function () {
   var bounds = new google.maps.LatLngBounds(this.center_, this.center_);
   this.bounds_ = this.markerClusterer_.getExtendedBounds(bounds);
+};
+
+
+/**
+ * Sets a cluster icon as selected and forces it's update.
+ */
+Cluster.prototype.setSelectedAndUpdateIcon_ = function () {
+  this.clusterIcon_.is_selected_ = true;
+
+  this.updateIcon_();
+};
+
+
+/**
+ * Sets a cluster icon as not selected and forces it's update.
+ */
+Cluster.prototype.unsetSelectedAndUpdateIcon_ = function () {
+  this.clusterIcon_.is_selected_ = false;
+
+  this.updateIcon_();
 };
 
 
@@ -661,8 +696,9 @@ Cluster.prototype.isMarkerAlreadyAdded_ = function (marker) {
  * @param {google.maps.Map} map The Google map to attach to.
  * @param {Array.<google.maps.Marker>} [opt_markers] The markers to be added to the cluster.
  * @param {MarkerClustererOptions} [opt_options] The optional parameters.
+ * @param {Array} [offers_markers_data] An array with same length of opt_markers containing the data of each offer marker.
  */
-function MarkerClusterer(map, opt_markers, opt_options) {
+function MarkerClusterer(map, opt_markers, opt_options, offers_markers_data) {
   // MarkerClusterer implements google.maps.OverlayView interface. We use the
   // extend function to extend MarkerClusterer with google.maps.OverlayView
   // because it might not always be available when the code is defined so we
@@ -672,8 +708,10 @@ function MarkerClusterer(map, opt_markers, opt_options) {
 
   opt_markers = opt_markers || [];
   opt_options = opt_options || {};
+  offers_markers_data = offers_markers_data || {};
 
   this.markers_ = [];
+  this.offers_markers_data_ = offers_markers_data;
   this.clusters_ = [];
   this.listeners_ = [];
   this.activeMap_ = null;
@@ -739,7 +777,6 @@ MarkerClusterer.prototype.onAdd = function () {
   // Add the map event listeners
   this.listeners_ = [
     google.maps.event.addListener(this.getMap(), "zoom_changed", function () {
-      cMarkerClusterer.resetViewport_(false);
       // Workaround for this Google bug: when map is at level 0 and "-" of
       // zoom slider is clicked, a "zoom_changed" event is fired even though
       // the map doesn't zoom out any further. In this situation, no "idle"
@@ -1179,6 +1216,107 @@ MarkerClusterer.prototype.getClusters = function () {
 
 
 /**
+ *  Adds a favourite offer to the cluster that holds a certain offerId and forces its icon update with the customCssClasses.
+ *
+ *  @param {string} offerId The offer id that identifies the cluster to add the favourite to.
+ *  @param {string} customCssClasses The css classes to add to the cluster icon before updating it.
+ */
+MarkerClusterer.prototype.addFavouriteOffer = function (offerId, customCssClasses) {
+  var clusterToUpdate = this.getClusterByOfferId(offerId);
+  if (!clusterToUpdate) {
+    return;
+  }
+
+  clusterToUpdate.numberOfFavourites_++;
+  if (clusterToUpdate.numberOfFavourites_ > 0) {
+    clusterToUpdate.clusterIcon_.custom_classes_ = customCssClasses;
+  }
+
+  clusterToUpdate.updateIcon_();
+};
+
+
+/**
+ *  Removes a favourite offer from the cluster that holds a certain offerId and forces its icon update with the customCssClasses.
+ *
+ *  @param {string} offerId The offer id that identifies the cluster to remove the favourite from.
+ *  @param {string} customCssClasses The css classes to add to the cluster icon before updating it.
+ */
+MarkerClusterer.prototype.removeFavouriteOffer = function (offerId, customCssClasses) {
+  var clusterToUpdate = this.getClusterByOfferId(offerId);
+  if (!clusterToUpdate) {
+    return;
+  }
+
+  clusterToUpdate.numberOfFavourites_--;
+  if (clusterToUpdate.numberOfFavourites_ < 1) {
+    clusterToUpdate.clusterIcon_.custom_classes_ = customCssClasses;
+  }
+
+  clusterToUpdate.updateIcon_();
+};
+
+
+/**
+ *  Sets the cluster that holds a certain offerId as hovered and forces its icon update.
+ *
+ *  @param {string} offerId The offer id that identifies the cluster to set as hovered.
+ */
+MarkerClusterer.prototype.setHoveredAndUpdateIcon = function (offerId) {
+  var clusterToUpdate = this.getClusterByOfferId(offerId);
+  if (!clusterToUpdate) {
+    return;
+  }
+
+  clusterToUpdate.clusterIcon_.is_offer_hovered_ = true;
+
+  clusterToUpdate.updateIcon_();
+};
+
+
+/**
+ *  Unsets the cluster that holds a certain offerId from hovered and forces its icon update.
+ *
+ *  @param {string} offerId The offer id that identifies the cluster to unset from hovered.
+ */
+MarkerClusterer.prototype.unsetHoveredAndUpdateIcon = function (offerId) {
+  var clusterToUpdate = this.getClusterByOfferId(offerId);
+  if (!clusterToUpdate) {
+    return;
+  }
+
+  clusterToUpdate.clusterIcon_.is_offer_hovered_ = false;
+
+  clusterToUpdate.updateIcon_();
+};
+
+
+/**
+ *  Gets a cluster by offerId (each cluster stores an array of the offer ids that is storing).
+ *
+ *  @param {string} offerId The offer id that identifies the cluster.
+ *  @return {Cluster} The cluster that holds the offerId or undefined if cluster with offerId doesn't exist.
+ */
+MarkerClusterer.prototype.getClusterByOfferId = function (offerId) {
+  var i, clusterToUpdate, cluster;
+
+  if (!this.clusters_) {
+    return;
+  }
+
+  for (i = 0; i < this.clusters_.length; i++) {
+    cluster = this.clusters_[i];
+
+    if (cluster.offersIds_.indexOf(offerId) > -1) {
+      clusterToUpdate = cluster;
+    }
+  }
+
+  return clusterToUpdate;
+};
+
+
+/**
  * Returns the number of clusters formed by the clusterer.
  *
  * @return {number} The number of clusters formed by the clusterer.
@@ -1468,8 +1606,9 @@ MarkerClusterer.prototype.isMarkerInBounds_ = function (marker, bounds) {
  * Adds a marker to a cluster, or creates a new cluster.
  *
  * @param {google.maps.Marker} marker The marker to add.
+ * @param {Json} offer_marker_data The data of the marker to be added.
  */
-MarkerClusterer.prototype.addToClosestCluster_ = function (marker) {
+MarkerClusterer.prototype.addToClosestCluster_ = function (marker, offer_marker_data) {
   var i, d, cluster, center;
   var distance = 40000; // Some large number
   var clusterToAddTo = null;
@@ -1486,10 +1625,10 @@ MarkerClusterer.prototype.addToClosestCluster_ = function (marker) {
   }
 
   if (clusterToAddTo && clusterToAddTo.isMarkerInClusterBounds(marker)) {
-    clusterToAddTo.addMarker(marker);
+    clusterToAddTo.addMarker(marker, offer_marker_data);
   } else {
     cluster = new Cluster(this);
-    cluster.addMarker(marker);
+    cluster.addMarker(marker, offer_marker_data);
     this.clusters_.push(cluster);
   }
 };
@@ -1545,7 +1684,7 @@ MarkerClusterer.prototype.createClusters_ = function (iFirst) {
     marker = this.markers_[i];
     if (!marker.isAdded && this.isMarkerInBounds_(marker, bounds)) {
       if (!this.ignoreHidden_ || (this.ignoreHidden_ && marker.getVisible())) {
-        this.addToClosestCluster_(marker);
+        this.addToClosestCluster_(marker, this.offers_markers_data_[i + iFirst]);
       }
     }
   }
@@ -1675,4 +1814,3 @@ if (typeof String.prototype.trim !== 'function') {
     return this.replace(/^\s+|\s+$/g, '');
   };
 }
-
