@@ -527,6 +527,15 @@ Cluster.prototype.addMarker = function (marker, offerMarkerData) {
   }
 
   this.offersIds_.push(offerMarkerData.offerId);
+  
+  var ua = window.navigator.userAgent;
+  var msie = ua.indexOf('MSIE ');
+  var isIE = msie > 0;// check if the browser is MSIE <= 10
+  var isTridentIE = !!navigator.userAgent.match(/Trident.*rv\:11\./);// check if browser is MSIE >= 11
+  
+  if (isIE || isTridentIE) {
+    this.clusterIcon_.label_ = offerMarkerData.label;// fallback for IE
+  }
 
   return true;
 };
