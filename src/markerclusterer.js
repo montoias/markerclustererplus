@@ -527,6 +527,13 @@ Cluster.prototype.addMarker = function (marker, offerMarkerData) {
   }
 
   this.offersIds_.push(offerMarkerData.offerId);
+  
+  var ua = window.navigator.userAgent;
+  var msie = ua.indexOf('MSIE ');
+  
+  if (msie > 0 || !!navigator.userAgent.match(/Trident.*rv\:11\./)) {
+    this.clusterIcon_.label_ = offerMarkerData.label;// fallback for IE
+  }
 
   return true;
 };
